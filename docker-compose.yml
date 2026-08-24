@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # 1. WhatsApp Baileys Gateway Service
+  whatsapp-service:
+    build:
+      context: ./whatsapp-service
+      dockerfile: Dockerfile
+    container_name: cb_whatsapp_service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    volumes:
+      - whatsapp_session_data:/app/auth_info_baileys
+    environment:
+      - PORT=3001
+    networks:
+      - cbcrm_net
+
+  # 2. FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cb_backend
+    restart: unless-stopped
+    depends_on:
+      - whatsapp-service
+    ports:
+      - "8000:8000"
+    volumes:
+      - backend_data:/app
+    environment:
+      - WHATSAPP_GATEWAY_URL=http://whatsapp-service:3001
+      - DATABASE_URL=sqlite:///./whatsapp_crm.db
+    networks:
+      - cbcrm_net
+
+  # 3. React + Vite Frontend (Nginx)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: cb_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+    networks:
+      - cbcrm_net
+
+volumes:
+  whatsapp_session_data:
+  backend_data:
+
+networks:
+  cbcrm_net:
+    driver: bridge
