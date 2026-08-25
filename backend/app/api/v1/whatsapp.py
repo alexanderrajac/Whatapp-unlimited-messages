@@ -39,7 +39,19 @@ async def disconnect_whatsapp():
     """Log out and disconnect linked WhatsApp account."""
     return await whatsapp_client.disconnect()
 
+class PairCodeRequest(BaseModel):
+    phone: str
+
+@router.post("/pair-code")
+async def request_pairing_code(req: PairCodeRequest):
+    """Request 8-character pairing code for mobile browser linking ('Link with phone number')."""
+    res = await whatsapp_client.request_pairing_code(phone=req.phone)
+    if not res.get("success"):
+        raise HTTPException(status_code=400, detail=res.get("error", "Failed to generate pairing code"))
+    return res
+
 @router.post("/toggle-simulation")
 async def toggle_simulation_mode(req: ToggleSimRequest):
     """Toggle simulated demo mode for testing UI & workflows without physical phone."""
     return await whatsapp_client.toggle_simulation(enable=req.enable, phone=req.phone, name=req.name)
+

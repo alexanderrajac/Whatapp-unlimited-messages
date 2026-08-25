@@ -8,6 +8,7 @@ from app.models.campaign import Campaign, CampaignRecipient
 from app.models.message import MessageLog
 from app.models.contact import Contact
 from app.services.whatsapp_client import whatsapp_client
+from app.services.template_service import template_service
 from typing import Dict
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,8 @@ class CampaignRunner:
         """
         Execute campaign sequentially:
         - Sends personalized message to each recipient with randomized human delay.
+        - Dynamically evaluates Spintax for anti-ban randomization.
+        - Applies batch micro-cooldowns every 20 messages.
         - Updates DB in real time.
         - Supports pause, resume, and cancellation.
         """
@@ -45,6 +48,7 @@ class CampaignRunner:
 
             min_delay = max(1, campaign.min_delay or 3)
             max_delay = max(min_delay, campaign.max_delay or 6)
+            processed_count = 0
 
             for recipient in recipients:
                 # Check if campaign was paused or cancelled mid-flight
@@ -57,6 +61,13 @@ class CampaignRunner:
                 if recipient.status in ["SENT", "FAILED"]:
                     continue
 
+                processed_count += 1
+                # Anti-ban batch cooldown: every 20 messages, add a gentle 8-15s cooldown
+                if processed_count > 0 and processed_count % 20 == 0:
+                    cooldown = random.uniform(8.0, 15.0)
+                    logger.info(f"[CampaignRunner] Anti-ban cooldown break for {cooldown:.1f}s after {processed_count} messages.")
+                    await asyncio.sleep(cooldown)
+
                 # Randomized safety delay to mimic human behavior and avoid spam filters
                 delay = random.uniform(min_delay, max_delay)
                 await asyncio.sleep(delay)
@@ -66,10 +77,13 @@ class CampaignRunner:
                 if campaign.status in ["PAUSED", "CANCELLED"]:
                     break
 
+                # Parse dynamic Spintax for unique wording per recipient
+                message_text = template_service.parse_spintax(recipient.personalized_text)
+
                 # Send via WhatsApp Gateway
                 res = await whatsapp_client.send_message(
                     phone=recipient.phone_number,
-                    message=recipient.personalized_text,
+                    message=message_text,
                     media_url=campaign.media_url,
                     media_type=campaign.media_type
                 )

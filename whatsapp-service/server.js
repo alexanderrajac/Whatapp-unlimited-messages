@@ -238,7 +238,63 @@ app.post('/logout', async (req, res) => {
   }
 });
 
-// 4. Force Restart Socket
+// 4. Request 8-Digit Pairing Code for Mobile Linking ("Link with Phone Number")
+app.post('/pair-code', async (req, res) => {
+  const { phone } = req.body;
+  if (!phone) {
+    return res.status(400).json({ success: false, error: 'Phone number is required.' });
+  }
+
+  let cleaned = String(phone).replace(/[^\d]/g, '');
+  if (!cleaned) {
+    return res.status(400).json({ success: false, error: 'Invalid phone number.' });
+  }
+  if (cleaned.length === 10) {
+    cleaned = '91' + cleaned;
+  }
+
+  if (connectionState === 'CONNECTED' && !isSimulationMode) {
+    return res.status(400).json({
+      success: false,
+      error: 'WhatsApp is already connected. Disconnect first to link a new number.'
+    });
+  }
+
+  try {
+    if (!sock || !sock.authState) {
+      await startWhatsApp();
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    if (sock.authState?.creds?.registered) {
+      return res.status(400).json({
+        success: false,
+        error: 'WhatsApp session is already registered. Please disconnect first.'
+      });
+    }
+
+    const code = await sock.requestPairingCode(cleaned);
+    const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
+
+    console.log(`[WhatsApp Gateway] Generated pairing code for ${cleaned}: ${formattedCode}`);
+
+    return res.json({
+      success: true,
+      code: formattedCode,
+      rawCode: code,
+      phone: cleaned,
+      expiresInSeconds: 120
+    });
+  } catch (error) {
+    console.error(`[WhatsApp Gateway] Error requesting pairing code for ${cleaned}:`, error);
+    return res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to request WhatsApp pairing code'
+    });
+  }
+});
+
+// 5. Force Restart Socket
 app.post('/restart', async (req, res) => {
   try {
     if (sock) {

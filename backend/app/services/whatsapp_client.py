@@ -80,6 +80,22 @@ class WhatsAppClient:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def request_pairing_code(self, phone: str) -> Dict[str, Any]:
+        """Request 8-character pairing code for linking device via phone number on mobile."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(f"{self.gateway_url}/pair-code", json={"phone": phone})
+                data = res.json()
+                if res.status_code == 200 and data.get("success"):
+                    return data
+                return {
+                    "success": False,
+                    "error": data.get("error", "Failed to generate pairing code")
+                }
+        except Exception as e:
+            logger.error(f"Error requesting pairing code for {phone}: {e}")
+            return {"success": False, "error": str(e)}
+
     async def toggle_simulation(self, enable: Optional[bool] = None, phone: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         """Toggle simulation/demo mode for rapid preview and testing."""
         try:
@@ -94,3 +110,4 @@ class WhatsAppClient:
             return {"success": False, "error": str(e)}
 
 whatsapp_client = WhatsAppClient()
+
