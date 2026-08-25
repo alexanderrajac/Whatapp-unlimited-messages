@@ -14,7 +14,7 @@ const {
 } = require('@whiskeysockets/baileys');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.WHATSAPP_PORT || 3001;
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
