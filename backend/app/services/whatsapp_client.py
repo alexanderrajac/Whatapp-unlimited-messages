@@ -96,6 +96,15 @@ class WhatsAppClient:
             logger.error(f"Error requesting pairing code for {phone}: {e}")
             return {"success": False, "error": str(e)}
 
+    async def reset_session(self) -> Dict[str, Any]:
+        """Reset and clean stale session credentials on the gateway."""
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                res = await client.post(f"{self.gateway_url}/reset-session")
+                return res.json()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     async def toggle_simulation(self, enable: Optional[bool] = None, phone: Optional[str] = None, name: Optional[str] = None) -> Dict[str, Any]:
         """Toggle simulation/demo mode for rapid preview and testing."""
         try:

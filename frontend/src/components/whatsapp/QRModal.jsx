@@ -123,6 +123,20 @@ export default function QRModal({ isOpen, onClose, onStatusChange }) {
     }
   };
 
+  const handleResetSession = async () => {
+    setLoading(true);
+    setError(null);
+    setPairCode('');
+    try {
+      await api.post('/whatsapp/reset-session');
+      await fetchStatus();
+    } catch (err) {
+      setError("Error resetting session: " + (err.response?.data?.error || err.message));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleToggleSimulation = async () => {
     setLoading(true);
     try {
@@ -533,7 +547,18 @@ export default function QRModal({ isOpen, onClose, onStatusChange }) {
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 bg-slate-950 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-3 bg-slate-950 border-t border-slate-800 flex items-center justify-between">
+          {!statusData.isConnected ? (
+            <button
+              onClick={handleResetSession}
+              disabled={loading}
+              className="text-xs text-slate-400 hover:text-amber-300 flex items-center gap-1.5 transition-colors py-1.5 px-2.5 rounded-lg hover:bg-slate-800/80"
+              title="Click if WhatsApp says 'Could not link device' to clear temporary handshake keys"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Reset Stale Keys & Refresh
+            </button>
+          ) : <div />}
           <button
             onClick={onClose}
             className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium transition-colors"

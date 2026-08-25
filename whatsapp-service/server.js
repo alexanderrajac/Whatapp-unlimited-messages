@@ -10,6 +10,7 @@ const {
   useMultiFileAuthState,
   fetchLatestBaileysVersion,
   makeInMemoryStore,
+  Browsers,
   proto
 } = require('@whiskeysockets/baileys');
 
@@ -46,7 +47,10 @@ async function startWhatsApp() {
       logger,
       printQRInTerminal: false,
       auth: state,
-      browser: ['CarpenterBullet CRM', 'Chrome', '120.0.0'],
+      browser: Browsers.macOS('Desktop'),
+      syncFullHistory: false,
+      markOnlineOnConnect: true,
+      generateHighQualityLinkPreview: true,
       connectTimeoutMs: 60000,
       defaultQueryTimeoutMs: 60000,
       keepAliveIntervalMs: 25000,
@@ -78,7 +82,7 @@ async function startWhatsApp() {
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
         console.log(`[WhatsApp Gateway] Connection closed. Reason: ${statusCode}, shouldReconnect: ${shouldReconnect}`);
         
         connectionState = 'DISCONNECTED';
@@ -86,12 +90,16 @@ async function startWhatsApp() {
         rawQrCode = null;
         connectedUser = null;
 
-        if (statusCode === DisconnectReason.loggedOut) {
+        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
           cleanAuth();
         }
 
-        if (shouldReconnect && !isSimulationMode) {
-          setTimeout(() => startWhatsApp(), 3000);
+        // Handle 515 (restartRequired) immediately upon successful linking handshake
+        if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
+          console.log('[WhatsApp Gateway] Restart required (515) - reconnecting with saved session...');
+          setTimeout(() => startWhatsApp(), 500);
+        } else if (shouldReconnect && !isSimulationMode) {
+          setTimeout(() => startWhatsApp(), 2000);
         }
       } else if (connection === 'open') {
         connectionState = 'CONNECTED';
@@ -294,7 +302,27 @@ app.post('/pair-code', async (req, res) => {
   }
 });
 
-// 5. Force Restart Socket
+// 5. Reset & Clean Session (clears stale auth files and generates fresh keys)
+app.post('/reset-session', async (req, res) => {
+  try {
+    if (sock) {
+      sock.end(undefined);
+      sock = null;
+    }
+    cleanAuth();
+    connectionState = 'DISCONNECTED';
+    qrCodeDataUrl = null;
+    rawQrCode = null;
+    connectedUser = null;
+    isSimulationMode = false;
+    setTimeout(() => startWhatsApp(), 1000);
+    res.json({ success: true, message: 'Session reset successfully. Fresh QR / Pairing code ready.' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 6. Force Restart Socket
 app.post('/restart', async (req, res) => {
   try {
     if (sock) {

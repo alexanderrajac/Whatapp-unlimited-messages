@@ -50,6 +50,11 @@ async def request_pairing_code(req: PairCodeRequest):
         raise HTTPException(status_code=400, detail=res.get("error", "Failed to generate pairing code"))
     return res
 
+@router.post("/reset-session")
+async def reset_session():
+    """Reset and clean stale session credentials."""
+    return await whatsapp_client.reset_session()
+
 @router.post("/toggle-simulation")
 async def toggle_simulation_mode(req: ToggleSimRequest):
     """Toggle simulated demo mode for testing UI & workflows without physical phone."""
