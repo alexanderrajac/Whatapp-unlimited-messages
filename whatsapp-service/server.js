@@ -27,12 +27,34 @@ let rawQrCode = null;
 let connectionState = 'DISCONNECTED'; // 'DISCONNECTED' | 'SCAN_QR' | 'CONNECTING' | 'CONNECTED'
 let connectedUser = null;
 let isSimulationMode = false;
+let reconnectTimer = null;
+let isStarting = false;
 
 const AUTH_FOLDER = path.join(__dirname, 'auth_info_baileys');
 const logger = pino({ level: 'silent' });
 
+function scheduleReconnect(delayMs = 2000) {
+  if (isSimulationMode) return;
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    startWhatsApp();
+  }, delayMs);
+}
+
 async function startWhatsApp() {
+  if (isStarting) return;
+  isStarting = true;
+
   try {
+    if (sock) {
+      try {
+        sock.ev.removeAllListeners();
+        sock.end(undefined);
+      } catch (e) {}
+      sock = null;
+    }
+
     if (!fs.existsSync(AUTH_FOLDER)) {
       fs.mkdirSync(AUTH_FOLDER, { recursive: true });
     }
@@ -97,15 +119,16 @@ async function startWhatsApp() {
         if (isLoggedOut) {
           console.log('[WhatsApp Gateway] Device logged out. Cleaning auth...');
           cleanAuth();
-        }
-
-        // Handle 515 (restartRequired) or 428 or any reconnectable status
-        if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
+          scheduleReconnect(1500);
+        } else if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
           console.log('[WhatsApp Gateway] Restart required (515) - reconnecting with saved paired session...');
-          setTimeout(() => startWhatsApp(), 800);
-        } else if (!isLoggedOut && !isSimulationMode) {
+          scheduleReconnect(800);
+        } else if (statusCode === 440) {
+          console.log('[WhatsApp Gateway] Connection replaced (440). Waiting before reconnecting...');
+          scheduleReconnect(5000);
+        } else if (!isSimulationMode) {
           console.log('[WhatsApp Gateway] Reconnecting socket...');
-          setTimeout(() => startWhatsApp(), 1500);
+          scheduleReconnect(2500);
         }
       } else if (connection === 'open') {
         connectionState = 'CONNECTED';
@@ -126,6 +149,9 @@ async function startWhatsApp() {
   } catch (error) {
     console.error('[WhatsApp Gateway] Error initializing socket:', error);
     connectionState = 'DISCONNECTED';
+    scheduleReconnect(3000);
+  } finally {
+    isStarting = false;
   }
 }
 
@@ -380,6 +406,15 @@ app.post('/toggle-simulation', (req, res) => {
     status: connectionState,
     user: connectedUser
   });
+});
+
+// Process safety handlers to prevent crash on Baileys socket timeouts
+process.on('uncaughtException', (err) => {
+  console.error('[WhatsApp Gateway] Uncaught Exception caught safely:', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[WhatsApp Gateway] Unhandled Promise Rejection caught safely:', reason?.message || reason);
 });
 
 // Start Gateway
