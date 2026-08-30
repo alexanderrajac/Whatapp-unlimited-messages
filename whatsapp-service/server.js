@@ -47,7 +47,7 @@ async function startWhatsApp() {
       logger,
       printQRInTerminal: false,
       auth: state,
-      browser: Browsers.macOS('Desktop'),
+      browser: Browsers.ubuntu('Chrome'),
       syncFullHistory: false,
       markOnlineOnConnect: true,
       generateHighQualityLinkPreview: true,
@@ -73,7 +73,9 @@ async function startWhatsApp() {
               light: '#ffffff'
             }
           });
-          connectionState = 'SCAN_QR';
+          if (connectionState !== 'CONNECTED') {
+            connectionState = 'SCAN_QR';
+          }
           console.log('[WhatsApp Gateway] New QR code generated.');
         } catch (err) {
           console.error('[WhatsApp Gateway] Failed to generate QR Data URL:', err);
@@ -82,24 +84,28 @@ async function startWhatsApp() {
 
       if (connection === 'close') {
         const statusCode = (lastDisconnect?.error)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 401;
-        console.log(`[WhatsApp Gateway] Connection closed. Reason: ${statusCode}, shouldReconnect: ${shouldReconnect}`);
+        const isLoggedOut = statusCode === DisconnectReason.loggedOut;
+        console.log(`[WhatsApp Gateway] Connection closed. Reason: ${statusCode}, isLoggedOut: ${isLoggedOut}`);
         
-        connectionState = 'DISCONNECTED';
+        if (connectionState === 'CONNECTED') {
+          connectionState = 'DISCONNECTED';
+        }
         qrCodeDataUrl = null;
         rawQrCode = null;
         connectedUser = null;
 
-        if (statusCode === DisconnectReason.loggedOut || statusCode === 401) {
+        if (isLoggedOut) {
+          console.log('[WhatsApp Gateway] Device logged out. Cleaning auth...');
           cleanAuth();
         }
 
-        // Handle 515 (restartRequired) immediately upon successful linking handshake
+        // Handle 515 (restartRequired) or 428 or any reconnectable status
         if (statusCode === DisconnectReason.restartRequired || statusCode === 515) {
-          console.log('[WhatsApp Gateway] Restart required (515) - reconnecting with saved session...');
-          setTimeout(() => startWhatsApp(), 500);
-        } else if (shouldReconnect && !isSimulationMode) {
-          setTimeout(() => startWhatsApp(), 2000);
+          console.log('[WhatsApp Gateway] Restart required (515) - reconnecting with saved paired session...');
+          setTimeout(() => startWhatsApp(), 800);
+        } else if (!isLoggedOut && !isSimulationMode) {
+          console.log('[WhatsApp Gateway] Reconnecting socket...');
+          setTimeout(() => startWhatsApp(), 1500);
         }
       } else if (connection === 'open') {
         connectionState = 'CONNECTED';
@@ -269,22 +275,35 @@ app.post('/pair-code', async (req, res) => {
   }
 
   try {
-    if (!sock || !sock.authState) {
+    if (!sock) {
       await startWhatsApp();
-      await new Promise((r) => setTimeout(r, 1500));
+    }
+
+    // Ensure socket is active and ready before calling requestPairingCode
+    let ready = false;
+    for (let i = 0; i < 25; i++) {
+      if (sock && (rawQrCode || connectionState === 'SCAN_QR' || sock.ws?.isOpen)) {
+        ready = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+
+    if (!sock || !sock.authState) {
+      return res.status(500).json({ success: false, error: 'WhatsApp gateway socket not ready. Please try again in 2 seconds.' });
     }
 
     if (sock.authState?.creds?.registered) {
       return res.status(400).json({
         success: false,
-        error: 'WhatsApp session is already registered. Please disconnect first.'
+        error: 'WhatsApp session is already registered. Please click Disconnect or Reset Keys first.'
       });
     }
 
     const code = await sock.requestPairingCode(cleaned);
     const formattedCode = code?.match(/.{1,4}/g)?.join('-') || code;
 
-    console.log(`[WhatsApp Gateway] Generated pairing code for ${cleaned}: ${formattedCode}`);
+    console.log(`[WhatsApp Gateway] Successfully generated pairing code for ${cleaned}: ${formattedCode}`);
 
     return res.json({
       success: true,
